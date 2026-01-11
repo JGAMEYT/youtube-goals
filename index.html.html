@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Goals Tracker</title>
+<style>
+:root{
+  --bg:#fff; --primary:#e53935; --accent:#d32f2f; --muted:#555; --radius:12px; --pad:16px;
+}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  display:flex;
+  min-height:100vh;
+  background:var(--bg);
+  color:#333;
+}
+.side-nav{
+  width:220px;
+  background:var(--primary);
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  padding:20px;
+  gap:12px;
+}
+.side-nav h2{
+  margin-top:0;
+  margin-bottom:20px;
+  font-size:22px;
+  text-align:center;
+}
+.side-nav button{
+  background:none;
+  border:none;
+  color:#fff;
+  font-size:16px;
+  padding:10px;
+  border-radius:8px;
+  cursor:pointer;
+  text-align:left;
+}
+.side-nav button.active, .side-nav button:hover{
+  background:var(--accent);
+}
+.main{
+  flex:1;
+  padding:24px;
+  overflow-y:auto;
+}
+.card{
+  background:#fff;
+  border:2px solid var(--accent);
+  border-radius:var(--radius);
+  padding:var(--pad);
+  box-shadow:0 4px 12px rgba(0,0,0,0.1);
+  margin-bottom:20px;
+}
+.goal-list{display:flex;flex-direction:column;gap:12px;}
+.goal{display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:10px;border:1px solid var(--accent);}
+.goal h3{margin:0;color:var(--primary);}
+.progress-bar{height:20px;background:var(--accent);border-radius:10px;}
+.progress-container{background:#eee;border-radius:10px;overflow:hidden;margin-top:4px;}
+input, select, button{padding:8px;border-radius:8px;}
+input[type="number"], input[type="text"], select{border:1px solid var(--accent); width:100%; margin-bottom:8px;}
+button{cursor:pointer;font-weight:600; border:none; background:var(--primary); color:#fff; margin-left:4px;}
+button.ghost{background:#fff;color:var(--primary);border:2px solid var(--primary);}
+button.small{padding:4px 8px; font-size:0.9em;}
+#channelLogo{width:80px;height:80px;border-radius:50%;margin-bottom:16px;}
+.goal-buttons{display:flex;gap:4px;margin-left:10px;}
+</style>
+</head>
+<body>
+
+<div class="side-nav">
+  <h2>YouTube Tracker</h2>
+  <button class="nav-btn active" data-page="dashboard">Dashboard</button>
+  <button class="nav-btn" data-page="rewards">Rewards</button>
+</div>
+
+<div class="main">
+  <!-- Dashboard Page -->
+  <div id="dashboardPage">
+    <div class="card" style="text-align:center;">
+      <h3>Enter Your Channel ID</h3>
+      <input type="text" id="userChannelIdInput" placeholder="Paste channel ID here">
+      <button id="loadChannelBtn">Load Channel</button>
+    </div>
+
+    <div class="card" id="channelInfo" style="text-align:center; display:none;">
+      <img id="channelLogo" src="" alt="Channel Logo">
+      <h3 id="channelTitle"></h3>
+      <p>Subscribers: <span id="subsCount">0</span> | Views: <span id="viewsCount">0</span></p>
+    </div>
+
+    <div class="card">
+      <h2>Add a Goal</h2>
+      <input type="text" id="goalTitle" placeholder="Goal title">
+      <select id="goalType">
+        <option value="subscribers">Subscribers</option>
+        <option value="views">Views</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input type="number" id="goalTarget" placeholder="Target value">
+      <button id="addGoalBtn">Add Goal</button>
+    </div>
+
+    <div class="card">
+      <h2>Goals</h2>
+      <div id="goalList" class="goal-list">
+        <p style="color:#555;">No goals yet. Add one to start tracking!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rewards Page -->
+  <div id="rewardsPage" style="display:none;">
+    <div class="card">
+      <h2>Rewards</h2>
+      <div id="rewardList" class="goal-list">
+        <p style="color:#555;">No rewards yet.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let goals = [];
+let rewards = [];
+let channelData = {subs:0, views:0};
+let userChannelId = null;
+
+// Load goals/rewards from localStorage
+if(localStorage.getItem("goals")) goals = JSON.parse(localStorage.getItem("goals"));
+if(localStorage.getItem("rewards")) rewards = JSON.parse(localStorage.getItem("rewards"));
+
+function saveData(){
+  localStorage.setItem("goals", JSON.stringify(goals));
+  localStorage.setItem("rewards", JSON.stringify(rewards));
+}
+
+// Side nav
+document.querySelectorAll(".nav-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    if(btn.dataset.page==="dashboard"){
+      document.getElementById("dashboardPage").style.display="block";
+      document.getElementById("rewardsPage").style.display="none";
+    }else{
+      document.getElementById("dashboardPage").style.display="none";
+      document.getElementById("rewardsPage").style.display="block";
+    }
+  }
+});
+
+// Convert abbreviated subs (1.2K, 3M) to number
+function parseSubs(text){
+  let num = text.replace(/[^0-9.kKM]/g,'').toUpperCase();
+  if(num.endsWith('K')) return parseFloat(num)*1000;
+  if(num.endsWith('M')) return parseFloat(num)*1000000;
+  if(num.endsWith('B')) return parseFloat(num)*1000000000;
+  return parseInt(num) || 0;
+}
+
+// Fetch channel info using your API key (public)
+async function fetchChannelInfo(){
+  if(!userChannelId) return;
+  try{
+    const API_KEY = 'AIzaSyAxck5h6QiaBJ8ZVS30Ffo_uRIVg0gwDqc';
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${userChannelId}&key=${API_KEY}`);
+    const data = await res.json();
+    if(data.items && data.items.length>0){
+      const stats = data.items[0].statistics;
+      const snippet = data.items[0].snippet;
+      channelData.subs = parseInt(stats.subscriberCount);
+      channelData.views = parseInt(stats.viewCount);
+      document.getElementById("subsCount").textContent = channelData.subs;
+      document.getElementById("viewsCount").textContent = channelData.views;
+      document.getElementById("channelLogo").src = snippet.thumbnails.default.url;
+      document.getElementById("channelTitle").textContent = snippet.title;
+      document.getElementById("channelInfo").style.display="block";
+      updateGoalsFromChannel();
+    }
+  }catch(e){console.error("Failed to fetch channel info:", e);}
+}
+
+// Load channel when user enters ID
+document.getElementById("loadChannelBtn").onclick = ()=>{
+  const id = document.getElementById("userChannelIdInput").value.trim();
+  if(!id) return alert("Enter a valid channel ID");
+  userChannelId = id;
+  fetchChannelInfo();
+};
+
+// Add goal
+document.getElementById("addGoalBtn").onclick=()=>{
+  const title = document.getElementById("goalTitle").value.trim();
+  const type = document.getElementById("goalType").value;
+  const target = Number(document.getElementById("goalTarget").value);
+  if(!title || target<=0) return alert("Enter valid title and target");
+  goals.push({title,type,target,current:0});
+  saveData();
+  renderGoals();
+  document.getElementById("goalTitle").value="";
+  document.getElementById("goalTarget").value="";
+};
+
+// Update goal values for subs/views
+function updateGoalsFromChannel(){
+  goals.forEach(g=>{
+    if(g.type==="subscribers") g.current = channelData.subs;
+    if(g.type==="views") g.current = channelData.views;
+    checkCompletion(g);
+  });
+  saveData();
+  renderGoals();
+}
+
+// Render goals with edit/delete
+function renderGoals(){
+  const goalList = document.getElementById("goalList");
+  goalList.innerHTML="";
+  if(goals.length===0){
+    goalList.innerHTML="<p style='color:#555;'>No goals yet. Add one to start tracking!</p>";
+    return;
+  }
+  goals.forEach((g,i)=>{
+    const div = document.createElement("div");
+    div.className="goal";
+    const percent = g.current ? Math.min(100,(g.current/g.target)*100) : 0;
+    div.innerHTML=`
+      <div style="flex:1;">
+        <h3>${g.title}</h3>
+        <span>${g.type.charAt(0).toUpperCase() + g.type.slice(1)}: ${g.current} / ${g.target}</span>
+        <div class="progress-container"><div class="progress-bar" style="width:${percent}%"></div></div>
+      </div>
+      <div class="goal-buttons">
+        <button class="small" onclick="editGoal(${i})">Edit</button>
+        <button class="small" onclick="deleteGoal(${i})">Delete</button>
+      </div>
+    `;
+    goalList.appendChild(div);
+  });
+  renderRewards();
+}
+
+// Edit goal
+function editGoal(index){
+  const g = goals[index];
+  const newTitle = prompt("Edit title:", g.title);
+  const newType = prompt("Edit type (subscribers, views, custom):", g.type);
+  const newTarget = prompt("Edit target value:", g.target);
+  if(newTitle!==null) g.title = newTitle.trim();
+  if(newType!==null && ["subscribers","views","custom"].includes(newType)) g.type = newType;
+  if(newTarget!==null) g.target = Number(newTarget);
+  checkCompletion(g);
+  saveData();
+  renderGoals();
+}
+
+// Delete goal
+function deleteGoal(index){
+  if(confirm("Are you sure you want to delete this goal?")){
+    const removed = goals.splice(index,1);
+    const rewardIndex = rewards.indexOf(removed[0].title);
+    if(rewardIndex>-1) rewards.splice(rewardIndex,1);
+    saveData();
+    renderGoals();
+  }
+}
+
+// Check completion
+function checkCompletion(goal){
+  if(goal.current>=goal.target && !rewards.includes(goal.title)){
+    rewards.push(goal.title);
+    saveData();
+  }
+}
+
+// Render rewards
+function renderRewards(){
+  const rewardList = document.getElementById("rewardList");
+  rewardList.innerHTML="";
+  if(rewards.length===0){
+    rewardList.innerHTML="<p style='color:#555;'>No rewards yet.</p>";
+    return;
+  }
+  rewards.forEach(r=>{
+    const div = document.createElement("div");
+    div.className="goal";
+    div.innerHTML=`<h3>${r}</h3>`;
+    rewardList.appendChild(div);
+  });
+}
+
+// Auto-refresh every 10s
+setInterval(fetchChannelInfo,10000);
+renderGoals();
+</script>
+</body>
+</html>
